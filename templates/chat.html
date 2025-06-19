@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>LogBot Chat</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+    <style>
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: stretch;
+            background-color: #f4f6f8;
+            font-family: Arial, sans-serif;
+        }
+
+        .chat-container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            width: 100%;
+            max-width: 900px;
+            padding: 20px;
+            box-sizing: border-box;
+            background-color: #ffffff;
+            border-radius: 12px;
+            box-shadow: 0 0 12px rgba(0, 0, 0, 0.1);
+        }
+
+        .chat-box {
+            flex: 1;
+            font-family: monospace;
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 10px;
+            overflow-y: auto;
+            padding: 10px;
+            margin-bottom: 20px;
+            min-height: 0;
+        }
+
+        .user-msg {
+            text-align: right;
+            margin-bottom: 15px;
+            color: #0d6efd;
+            font-weight: 600;
+            font-size: 1.1em;
+        }
+
+        .bot-msg {
+            text-align: left;
+            margin-bottom: 20px;
+            color: #212529;
+            white-space: pre-wrap;
+        }
+
+        .form-control {
+            border-radius: 20px;
+            min-width: 0;
+        }
+
+        .btn {
+            border-radius: 20px;
+            min-width: 100px;
+        }
+
+        .log-container {
+            margin-bottom: 15px;
+            border: 1px solid #ced4da;
+            border-radius: 8px;
+            padding: 10px;
+            background: #fff;
+        }
+
+        .log-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .log-table td {
+            border: 1px solid #ccc;
+            padding: 6px 10px;
+            text-align: left;
+            vertical-align: top;
+            font-size: 0.9em;
+            word-break: break-word;
+        }
+
+        .controls {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .controls label {
+            font-weight: 600;
+        }
+
+        @media (max-width: 600px) {
+            .controls {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .btn {
+                min-width: auto;
+            }
+
+    </style>
+</head>
+<body>
+    <div class="container chat-container">
+        <h3 class="text-center mb-2">LogBot 🧠</h3>
+
+        <div class="text-end mb-2">
+            <button class="btn btn-outline-success" onclick="summarizeLogs()">📊 Summarize Logs</button>
+        </div>
+
+
+        <div id="log-summary" class="alert alert-info d-none position-relative" role="alert">
+            <button type="button" class="btn-close position-absolute top-0 end-0 m-2" aria-label="Close" onclick="hideSummary()"></button>
+            <div id="log-summary-content"></div>
+        </div>
+
+        <div class="controls">
+            <div class="flex-grow-1">
+                <label for="namespace-select" class="form-label">Filter by Namespace:</label>
+                <select id="namespace-select" class="form-select" aria-label="Namespace filter">
+                    <option value="">Loading namespaces...</option>
+                </select>
+            </div>
+
+            <div class="flex-grow-1">
+                <label for="pod-select" class="form-label">Filter by Pod:</label>
+                <select id="pod-select" class="form-select" aria-label="Pod filter" disabled>
+                    <option value="">Select a namespace first</option>
+                </select>
+            </div>
+
+            <div>
+                <label for="limit-select" class="form-label">Number of log lines:</label>
+                <select id="limit-select" class="form-select" aria-label="Log line limit" style="width: 120px;">
+                    <option value="50" selected>50 lines</option>
+                    <option value="100">100 lines</option>
+                    <option value="500">500 lines</option>
+                    <option value="1000">1000 lines</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="chat-box" id="chat-box">
+            <div class="bot-msg">
+                Hi! Ask me things like:<br />
+                • show me error logs<br />
+                • show warn logs<br />
+                • debug logs<br />
+                • show all logs
+            </div>
+        </div>
+
+        <form id="chat-form" class="d-flex" role="search" aria-label="LogBot query form">
+            <input
+                type="text"
+                class="form-control me-2"
+                id="user-input"
+                placeholder="Type a query..."
+                aria-label="Type your log query"
+                autocomplete="off"
+                required
+            />
+            <button type="submit" class="btn btn-primary">Send</button>
+        </form>
+    </div>
+
+    <script>
+        const chatBox = document.getElementById("chat-box");
+        const chatForm = document.getElementById("chat-form");
+        const userInput = document.getElementById("user-input");
+        const namespaceSelect = document.getElementById("namespace-select");
+        const podSelect = document.getElementById("pod-select");
+        const limitSelect = document.getElementById("limit-select");
+
+        async function loadNamespaces() {
+            try {
+                const response = await fetch("/namespaces");
+                const data = await response.json();
+                namespaceSelect.innerHTML = "";
+                if (data.namespaces && data.namespaces.length > 0) {
+                    namespaceSelect.innerHTML = `<option value="">All namespaces</option>`;
+                    data.namespaces.forEach((ns) => {
+                        namespaceSelect.innerHTML += `<option value="${ns}">${ns}</option>`;
+                    });
+                } else {
+                    namespaceSelect.innerHTML = `<option value="">No namespaces found</option>`;
+                }
+                podSelect.innerHTML = `<option value="">Select a namespace first</option>`;
+                podSelect.disabled = true;
+            } catch (err) {
+                namespaceSelect.innerHTML = `<option value="">Error loading namespaces</option>`;
+                podSelect.innerHTML = `<option value="">Select a namespace first</option>`;
+                podSelect.disabled = true;
+            }
+        }
+
+        async function loadPods(namespace) {
+            if (!namespace) {
+                podSelect.innerHTML = `<option value="">Select a namespace first</option>`;
+                podSelect.disabled = true;
+                return;
+            }
+
+            try {
+                const response = await fetch(`/pods/${namespace}`);
+                const data = await response.json();
+
+                podSelect.innerHTML = "";
+                if (data.pods && data.pods.length > 0) {
+                    podSelect.innerHTML = `<option value="">All pods</option>`;
+                    data.pods.forEach((pod) => {
+                        podSelect.innerHTML += `<option value="${pod}">${pod}</option>`;
+                    });
+                    podSelect.disabled = false;
+                } else {
+                    podSelect.innerHTML = `<option value="">No pods found</option>`;
+                    podSelect.disabled = true;
+                }
+            } catch (err) {
+                podSelect.innerHTML = `<option value="">Error loading pods</option>`;
+                podSelect.disabled = true;
+            }
+        }
+
+        namespaceSelect.addEventListener("change", () => {
+            loadPods(namespaceSelect.value);
+        });
+
+        loadNamespaces();
+
+        function appendMessage(message, isUser = false, isLogTable = false) {
+            const div = document.createElement("div");
+            div.className = isUser ? "user-msg" : "bot-msg";
+
+            if (isLogTable) {
+                const container = document.createElement("div");
+                container.className = "log-container";
+
+                const table = document.createElement("table");
+                table.className = "log-table";
+
+                const tbody = document.createElement("tbody");
+
+                for (const line of message) {
+                    const cleanedLine = line.replace(/^\s*\d+\.\s*/, ""); // remove numbering like "1."
+                    const tr = document.createElement("tr");
+                    tr.innerHTML = `<td colspan="3">${cleanedLine}</td>`;
+                    tbody.appendChild(tr);
+                }
+
+                table.appendChild(tbody);
+                container.appendChild(table);
+                div.appendChild(container);
+            } else {
+                div.textContent = isUser ? "You: " + message : message;
+            }
+
+            chatBox.appendChild(div);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        chatForm.addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const message = userInput.value.trim();
+            const namespace = namespaceSelect.value;
+            const pod = podSelect.value;
+            const limit = limitSelect.value;
+
+            if (!message) return;
+
+            appendMessage(message, true);
+            userInput.value = "";
+
+            try {
+                const response = await fetch("/chat", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ message, namespace, pod, limit }),
+                });
+
+                const data = await response.json();
+
+                if (data.reply && data.reply.length > 0) {
+                    if (data.reply.length === 1 && data.reply[0].startsWith("⚠️")) {
+                        appendMessage(data.reply[0], false);
+                    } else {
+                        appendMessage(data.reply, false, true);
+                    }
+                } else {
+                    appendMessage("⚠️ No logs returned by server.");
+                }
+            } catch (error) {
+                appendMessage("⚠️ Error contacting the server.");
+            }
+        });
+
+        function summarizeLogs() {
+            const logRows = document.querySelectorAll(".log-table td");
+            if (!logRows.length) {
+                alert("No logs available to summarize.");
+                return;
+            }
+
+            let total = 0, errors = 0, warns = 0, infos = 0, debugs = 0;
+
+            logRows.forEach(td => {
+                const text = td.innerText.toLowerCase();
+                total++;
+                if (text.includes("error")) errors++;
+                else if (text.includes("warn")) warns++;
+                else if (text.includes("info")) infos++;
+                else if (text.includes("debug")) debugs++;
+            });
+
+            const summaryBox = document.getElementById("log-summary");
+            const contentBox = document.getElementById("log-summary-content");
+
+            contentBox.innerHTML = `
+                <strong>Log Summary:</strong><br/>
+                🔢 Total Log Lines: <b>${total}</b><br/>
+                ❌ Errors: <b style="color:red">${errors}</b><br/>
+                ⚠️ Warnings: <b style="color:orange">${warns}</b><br/>
+                ℹ️ Info: <b style="color:blue">${infos}</b><br/>
+                🐞 Debug: <b style="color:green">${debugs}</b>
+            `;
+
+            summaryBox.classList.remove("d-none");
+        }
+
+        function hideSummary() {
+            document.getElementById("log-summary").classList.add("d-none");
+        }
+    </script>
+</body>
+</html>
